@@ -13,7 +13,12 @@ const Users: FC = () => {
     return response.users;
   });
 
-  const addUserMutation = useMutation(async (user: User) => {
+  const addUserMutation = useMutation<
+    User[],
+    UserAlreadyExistsError | Error,
+    User,
+    { previousUsers: User[] }
+    >(async (user) => {
     const response = await addUser(user);
 
     if (response.status === 409) {
@@ -22,13 +27,24 @@ const Users: FC = () => {
 
     return response.json();
   }, {
+    onMutate: async (newUser) => {
+      await queryClient.cancelQueries('users');
+
+      const previousUsers: User[] = queryClient.getQueryData('users') ?? [];
+
+      queryClient.setQueryData('users', (old: User[] | undefined) =>
+        [...(old ?? []), newUser]);
+
+      return { previousUsers };
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['users'], {
         refetchActive: true,
         refetchInactive: false
       });
     },
-    onError: (error) => {
+    onError: (error, user, context) => {
+      queryClient.setQueryData('users', context?.previousUsers ?? [])
       if (error instanceof UserAlreadyExistsError) {
         NotificationManager.error('User already exists!')
       } else {
